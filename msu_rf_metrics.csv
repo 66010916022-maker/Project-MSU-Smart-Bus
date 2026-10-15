@@ -1,0 +1,2 @@
+﻿model,total_records,train_records,test_records,MAE_minutes,RMSE_minutes,R2
+Random Forest,1000,800,200,0.014567999999998929,0.03510315085572947,0.9999540230375302
