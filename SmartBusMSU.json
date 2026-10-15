@@ -1,0 +1,1818 @@
+{
+  "name": "SmartBusMSU",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "line-msu-bus",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1728,
+        480
+      ],
+      "id": "b7dcc478-80fe-48e8-8ce0-79306e9721d8",
+      "name": "LINE Webhook - MSU Bus",
+      "webhookId": "23abf008-f66f-4d0c-8dfd-a133664bee60"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.line.me/v2/bot/message/reply",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  replyToken: $json.replyToken,\n  messages: [\n    {\n      type: \"text\",\n      text: $json.text\n    }\n  ]\n}) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1120,
+        480
+      ],
+      "id": "45bcaf4a-7a30-461e-bda5-72ac80853d1f",
+      "name": "ตอบกลับ LINE1",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "tfNCzkP4l3yRGfTh",
+          "name": "Line API 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const event = $json.body.events?.[0];\n\nif (!event || event.type !== \"message\") {\n  return [];\n}\n\nconst message = event.message?.text || \"\";\nconst replyToken = event.replyToken;\n\n// รูปแบบที่รองรับ:\n// จาก ตลาดน้อย ไป คณะวิศวกรรมศาสตร์\nconst match = message.match(/^จาก\\s+(.+?)\\s+ไป\\s+(.+)$/);\n\nif (!match) {\n  return [\n    {\n      json: {\n        replyToken,\n        command: message,\n        valid: false,\n        text: \"กรุณาพิมพ์ในรูปแบบ\\nจาก [ต้นทาง] ไป [ปลายทาง]\\n\\nตัวอย่าง\\nจาก ตลาดน้อย ไป คณะวิศวกรรมศาสตร์\"\n      }\n    }\n  ];\n}\n\nconst origin = match[1].trim();\nconst destination = match[2].trim();\n\nreturn [\n  {\n    json: {\n      replyToken,\n      command: message,\n      origin,\n      destination,\n      valid: true\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1536,
+        480
+      ],
+      "id": "f21bd7bc-f702-430a-8739-1387976bfd07",
+      "name": "แยกคำสั่ง LINE"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "XI2esaSfvgJffwpe",
+          "mode": "list",
+          "cachedResultName": "MSU_EV_BUS_STOPS",
+          "cachedResultUrl": "/projects/vjj88NmEAGk8hI6D/datatables/XI2esaSfvgJffwpe"
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -1360,
+        480
+      ],
+      "id": "b48be2ba-5695-4dce-bd64-f6e4ffa0ac80",
+      "name": "ดึงข้อมูลป้าย MSU"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ==========================================\n// ค้นหาเส้นทางจาก LINE - MSU Smart Bus\n// รองรับเส้นทางวนรอบ\n// ==========================================\n\n// ดึงข้อมูลป้ายทั้งหมด\nconst stops = $('ดึงข้อมูลป้าย MSU')\n  .all()\n  .map(item => item.json);\n\n// ดึงคำสั่งจาก LINE\nconst command = $('แยกคำสั่ง LINE').first().json;\n\n\n// ==========================================\n// ตรวจสอบคำสั่ง\n// ==========================================\n\nif (!command.valid) {\n\n  return [{\n    json: {\n      replyToken: command.replyToken || \"\",\n      text: command.text || \"❌ รูปแบบคำสั่งไม่ถูกต้อง\"\n    }\n  }];\n\n}\n\n\n// ==========================================\n// รับต้นทาง / ปลายทาง\n// ==========================================\n\nlet origin = String(command.origin || \"\").trim();\nlet destination = String(command.destination || \"\").trim();\n\nconst replyToken = command.replyToken || \"\";\n\n\n// ==========================================\n// Alias ชื่อป้าย\n// ==========================================\n\nconst aliases = {\n\n  \"วิศวกรรมศาสตร์\": \"คณะวิศวกรรมศาสตร์\",\n\n  \"เภสัชศาสตร์\": \"หน้าคณะเภสัชศาสตร์\",\n\n  \"อธิการบดี\": \"สำนักงานอธิการบดี\",\n\n  \"ราชนครินทร์\": \"หน้าอาคารราชนครินทร์\",\n\n  \"โรงอาหาร\": \"โรงอาหาร ม.เก่า\",\n\n  \"การท่องเที่ยว\": \"คณะการท่องเที่ยว\",\n\n  \"คอนโด 3\": \"ป้อมยามหน้าคอนโด 3\",\n\n  \"โรงเรียนสาธิต\":\n    \"หน้าโรงเรียนสาธิต มมส. (ฝ่ายประถม)\",\n\n  \"โรงพยาบาลสุทธาเวช\":\n    \"ข้างโรงพยาบาลสุทธาเวช\",\n\n  \"การบัญชี\": \"แยกคณะการบัญชีฯ\",\n\n  \"ตลาด\": \"ตลาดน้อย\",\n\n  \"พลาซ่า\": \"พลาซ่า\",\n\n  \"คอนโดบุคลากร\": \"คอนโดบุคลากร\",\n\n  \"สถานีชาร์จ\": \"สถานีชาร์จ\"\n\n};\n\n\n// ==========================================\n// แปลง Alias\n// ==========================================\n\norigin = aliases[origin] || origin;\ndestination = aliases[destination] || destination;\n\n\n// ==========================================\n// ฟังก์ชันแปลง sequence เป็นตัวเลข\n// ==========================================\n\nfunction seq(stop) {\n  return Number(stop.sequence);\n}\n\n\n// ==========================================\n// ค้นหาป้ายต้นทาง / ปลายทาง\n// ==========================================\n\nconst originStops = stops.filter(\n  stop => stop.stop_name === origin\n);\n\nconst destinationStops = stops.filter(\n  stop => stop.stop_name === destination\n);\n\n\n// ==========================================\n// ไม่พบต้นทาง\n// ==========================================\n\nif (originStops.length === 0) {\n\n  return [{\n    json: {\n      replyToken,\n\n      text:\n        `❌ ไม่พบป้ายต้นทาง\n\n📍 ต้นทาง: ${command.origin}\n\nกรุณาตรวจสอบชื่อป้ายอีกครั้ง`\n    }\n  }];\n\n}\n\n\n// ==========================================\n// ไม่พบปลายทาง\n// ==========================================\n\nif (destinationStops.length === 0) {\n\n  return [{\n    json: {\n      replyToken,\n\n      text:\n        `❌ ไม่พบป้ายปลายทาง\n\n🎯 ปลายทาง: ${command.destination}\n\nกรุณาตรวจสอบชื่อป้ายอีกครั้ง`\n    }\n  }];\n\n}\n\n\n// ==========================================\n// ค้นหาเส้นทาง\n// ==========================================\n\nconst results = [];\n\n\n// ==========================================\n// วนทุกคู่ต้นทาง / ปลายทาง\n// ==========================================\n\nfor (const originStop of originStops) {\n\n  for (const destinationStop of destinationStops) {\n\n    // ต้องเป็นสายเดียวกัน\n    if (\n      originStop.route_id !==\n      destinationStop.route_id\n    ) {\n      continue;\n    }\n\n\n    // ========================================\n    // ป้ายทั้งหมดของสายนี้\n    // ========================================\n\n    const routeStops = stops\n      .filter(\n        stop =>\n          stop.route_id === originStop.route_id\n      )\n      .sort(\n        (a, b) =>\n          seq(a) - seq(b)\n      );\n\n\n    if (routeStops.length === 0) {\n      continue;\n    }\n\n\n    // ========================================\n    // ตำแหน่งต้นทาง / ปลายทาง\n    // ========================================\n\n    const originIndex =\n      routeStops.findIndex(\n        stop =>\n          stop.stop_id === originStop.stop_id\n      );\n\n    const destinationIndex =\n      routeStops.findIndex(\n        stop =>\n          stop.stop_id === destinationStop.stop_id\n      );\n\n\n    if (\n      originIndex === -1 ||\n      destinationIndex === -1\n    ) {\n      continue;\n    }\n\n\n    // ========================================\n    // คำนวณจำนวนป้ายแบบวนรอบ\n    // ========================================\n\n    let stopCount;\n\n    if (destinationIndex >= originIndex) {\n\n      // ปลายทางอยู่ข้างหน้า\n      stopCount =\n        destinationIndex -\n        originIndex;\n\n    } else {\n\n      // ปลายทางอยู่หลัง\n      // ต้องวนกลับต้นเส้นทาง\n      stopCount =\n        routeStops.length -\n        originIndex +\n        destinationIndex;\n\n    }\n\n\n    // ========================================\n    // สร้างรายการป้ายตั้งแต่ต้นทาง\n    // ถึงปลายทาง\n    // ========================================\n\n    const selectedStops = [];\n\n    let currentIndex = originIndex;\n\n    let safetyCounter = 0;\n\n    while (true) {\n\n      selectedStops.push(\n        routeStops[currentIndex]\n      );\n\n      if (\n        currentIndex ===\n        destinationIndex\n      ) {\n        break;\n      }\n\n      currentIndex++;\n\n      if (\n        currentIndex >=\n        routeStops.length\n      ) {\n        currentIndex = 0;\n      }\n\n      safetyCounter++;\n\n      // ป้องกัน loop ผิดพลาด\n      if (\n        safetyCounter >\n        routeStops.length\n      ) {\n        break;\n      }\n\n    }\n\n\n    // ========================================\n    // ชื่อสายรถ\n    // ========================================\n\n    let routeName;\n\n    if (originStop.route_id === \"RED\") {\n\n      routeName = \"🔴 สายสีแดง\";\n\n    } else if (\n      originStop.route_id === \"BLUE\"\n    ) {\n\n      routeName = \"🔵 สายสีน้ำเงิน\";\n\n    } else {\n\n      routeName =\n        `สาย ${originStop.route_id}`;\n\n    }\n\n\n    // ========================================\n    // บันทึกผลลัพธ์\n    // ========================================\n\n    results.push({\n\n      json: {\n\n        replyToken,\n\n        origin:\n          command.origin,\n\n        destination:\n          command.destination,\n\n        origin_normalized:\n          origin,\n\n        destination_normalized:\n          destination,\n\n        route_id:\n          originStop.route_id,\n\n        route_name:\n          routeName,\n\n        origin_stop_id:\n          originStop.stop_id,\n\n        destination_stop_id:\n          destinationStop.stop_id,\n\n        origin_sequence:\n          seq(originStop),\n\n        destination_sequence:\n          seq(destinationStop),\n\n        stop_count:\n          stopCount,\n\n        // ป้ายทั้งหมดที่ต้องผ่าน\n        route_stops:\n          selectedStops.map(stop => ({\n\n            stop_id:\n              stop.stop_id,\n\n            stop_name:\n              stop.stop_name,\n\n            sequence:\n              seq(stop)\n\n          }))\n\n      }\n\n    });\n\n  }\n\n}\n\n\n// ==========================================\n// ไม่พบเส้นทาง\n// ==========================================\n\nif (results.length === 0) {\n\n  return [{\n    json: {\n\n      replyToken,\n\n      origin:\n        command.origin,\n\n      destination:\n        command.destination,\n\n      text:\n        `❌ ไม่พบเส้นทาง\n\n📍 ต้นทาง: ${command.origin}\n🎯 ปลายทาง: ${command.destination}\n\nกรุณาตรวจสอบว่าทั้งสองป้ายอยู่ในเส้นทางรถเดียวกัน`\n\n    }\n  }];\n\n}\n\n\n// ==========================================\n// เลือกเส้นทางที่มีจำนวนป้ายน้อยที่สุด\n// ==========================================\n\nresults.sort(\n  (a, b) =>\n    a.json.stop_count -\n    b.json.stop_count\n);\n\n\n// ==========================================\n// ส่งเส้นทางที่เหมาะสมที่สุดกลับไป\n// ==========================================\n\nreturn [results[0]];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1008,
+        480
+      ],
+      "id": "3d453c2f-4a6c-41db-89fc-80d42eef6eb1",
+      "name": "ค้นหาเส้นทางจาก LINE"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ==========================================\n// คำนวณระยะทางระหว่างป้ายรถ\n// ใช้สูตร Haversine\n// ==========================================\n\nconst stops = $input.all().map(item => item.json);\n\n\n// ------------------------------------------\n// ฟังก์ชันคำนวณระยะทางจาก Latitude/Longitude\n// ผลลัพธ์เป็นกิโลเมตร\n// ------------------------------------------\n\nfunction calculateDistance(lat1, lon1, lat2, lon2) {\n\n  const R = 6371; // รัศมีโลก km\n\n  const dLat =\n    (lat2 - lat1) * Math.PI / 180;\n\n  const dLon =\n    (lon2 - lon1) * Math.PI / 180;\n\n  const a =\n    Math.sin(dLat / 2) ** 2 +\n    Math.cos(lat1 * Math.PI / 180) *\n    Math.cos(lat2 * Math.PI / 180) *\n    Math.sin(dLon / 2) ** 2;\n\n  const c =\n    2 * Math.atan2(\n      Math.sqrt(a),\n      Math.sqrt(1 - a)\n    );\n\n  return R * c;\n}\n\n\n// ------------------------------------------\n// เรียงป้ายตามสายและลำดับ\n// ------------------------------------------\n\nconst sortedStops = [...stops].sort((a, b) => {\n\n  if (a.route_id !== b.route_id) {\n\n    return a.route_id.localeCompare(b.route_id);\n\n  }\n\n  return Number(a.sequence) -\n         Number(b.sequence);\n});\n\n\n// ------------------------------------------\n// คำนวณระยะทางระหว่างป้ายติดกัน\n// ------------------------------------------\n\nconst results = [];\n\nfor (let i = 0; i < sortedStops.length; i++) {\n\n  const current = sortedStops[i];\n\n  const next = sortedStops[i + 1];\n\n\n  // ถ้าไม่มีป้ายถัดไป\n  if (!next) {\n    continue;\n  }\n\n\n  // ต้องเป็นสายเดียวกัน\n  if (\n    current.route_id !== next.route_id\n  ) {\n    continue;\n  }\n\n\n  // ตรวจสอบพิกัด\n  if (\n    current.latitude == null ||\n    current.longitude == null ||\n    next.latitude == null ||\n    next.longitude == null\n  ) {\n\n    results.push({\n\n      json: {\n\n        route_id:\n          current.route_id,\n\n        from_stop_id:\n          current.stop_id,\n\n        from_stop_name:\n          current.stop_name,\n\n        to_stop_id:\n          next.stop_id,\n\n        to_stop_name:\n          next.stop_name,\n\n        distance_km:\n          null,\n\n        status:\n          \"ไม่มีพิกัด\"\n\n      }\n\n    });\n\n    continue;\n  }\n\n\n  // ----------------------------------------\n  // คำนวณระยะทาง\n  // ----------------------------------------\n\n  const distanceKm =\n    calculateDistance(\n      Number(current.latitude),\n      Number(current.longitude),\n      Number(next.latitude),\n      Number(next.longitude)\n    );\n\n\n  results.push({\n\n    json: {\n\n      route_id:\n        current.route_id,\n\n      from_stop_id:\n        current.stop_id,\n\n      from_stop_name:\n        current.stop_name,\n\n      to_stop_id:\n        next.stop_id,\n\n      to_stop_name:\n        next.stop_name,\n\n      distance_km:\n        Number(distanceKm.toFixed(3)),\n\n      status:\n        \"คำนวณสำเร็จ\"\n\n    }\n\n  });\n}\n\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1184,
+        480
+      ],
+      "id": "5b4c10d8-a858-4275-a06a-1e8d6622eaf8",
+      "name": "คำนวณระยะทางจริงระหว่างป้าย"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// คำนวณระยะทางจากรถถึงปลายทาง\n// ใช้ Latitude / Longitude ของป้ายจริง\n// ========================================\n\nconst busData = $input.first().json;\n\n// ดึงข้อมูลป้ายทั้งหมด\nconst stops = $('ดึงข้อมูลป้าย MSU')\n  .all()\n  .map(item => item.json);\n\n\n// ========================================\n// ฟังก์ชัน Haversine\n// ใช้คำนวณระยะทางระหว่างพิกัด GPS\n// ========================================\n\nfunction haversine(lat1, lon1, lat2, lon2) {\n\n  const R = 6371; // รัศมีโลก km\n\n  const dLat =\n    (lat2 - lat1) * Math.PI / 180;\n\n  const dLon =\n    (lon2 - lon1) * Math.PI / 180;\n\n  const a =\n    Math.sin(dLat / 2) ** 2 +\n    Math.cos(lat1 * Math.PI / 180) *\n    Math.cos(lat2 * Math.PI / 180) *\n    Math.sin(dLon / 2) ** 2;\n\n  const c =\n    2 * Math.atan2(\n      Math.sqrt(a),\n      Math.sqrt(1 - a)\n    );\n\n  return R * c;\n}\n\n\n// ========================================\n// ตรวจสอบข้อมูล\n// ========================================\n\nconst routeId =\n  busData.route_id;\n\nconst currentStopId =\n  busData.current_stop_id;\n\nconst destinationStopId =\n  busData.destination_stop_id;\n\n\nif (!routeId ||\n    !currentStopId ||\n    !destinationStopId) {\n\n  return [{\n    json: {\n      ...busData,\n      error: \"ข้อมูลป้ายสำหรับคำนวณระยะทางไม่ครบ\"\n    }\n  }];\n}\n\n\n// ========================================\n// เอาเฉพาะป้ายของสายรถ\n// ========================================\n\nconst routeStops = stops\n  .filter(stop =>\n    stop.route_id === routeId\n  )\n  .sort(\n    (a, b) =>\n      Number(a.sequence) -\n      Number(b.sequence)\n  );\n\n\n// หาตำแหน่งปัจจุบันและปลายทาง\nconst currentIndex =\n  routeStops.findIndex(\n    stop =>\n      stop.stop_id === currentStopId\n  );\n\nconst destinationIndex =\n  routeStops.findIndex(\n    stop =>\n      stop.stop_id === destinationStopId\n  );\n\n\nif (\n  currentIndex === -1 ||\n  destinationIndex === -1\n) {\n\n  return [{\n    json: {\n      ...busData,\n      error: \"ไม่พบป้ายในสายรถ\"\n    }\n  }];\n}\n\n\n// ========================================\n// คำนวณระยะทาง\n// ========================================\n\nlet totalDistance = 0;\n\n\n// กรณีอยู่ป้ายเดียวกัน\nif (currentIndex === destinationIndex) {\n\n  totalDistance = 0;\n\n}\n\n\n// กรณีปลายทางอยู่ข้างหน้า\nelse if (destinationIndex > currentIndex) {\n\n  for (\n    let i = currentIndex;\n    i < destinationIndex;\n    i++\n  ) {\n\n    const from = routeStops[i];\n    const to = routeStops[i + 1];\n\n    const lat1 = Number(from.latitude);\n    const lon1 = Number(from.longitude);\n\n    const lat2 = Number(to.latitude);\n    const lon2 = Number(to.longitude);\n\n    if (\n      !Number.isFinite(lat1) ||\n      !Number.isFinite(lon1) ||\n      !Number.isFinite(lat2) ||\n      !Number.isFinite(lon2)\n    ) {\n\n      return [{\n        json: {\n          ...busData,\n          error:\n            `ป้าย ${from.stop_name} หรือ ${to.stop_name} ไม่มีพิกัด`\n        }\n      }];\n    }\n\n    totalDistance +=\n      haversine(\n        lat1,\n        lon1,\n        lat2,\n        lon2\n      );\n  }\n\n}\n\n\n// ========================================\n// กรณีปลายทางอยู่ก่อนหน้า\n// รถวิ่งเป็นวงรอบ\n// ========================================\n\nelse {\n\n  // จากปัจจุบัน → ป้ายสุดท้าย\n  for (\n    let i = currentIndex;\n    i < routeStops.length - 1;\n    i++\n  ) {\n\n    const from = routeStops[i];\n    const to = routeStops[i + 1];\n\n    totalDistance +=\n      haversine(\n        Number(from.latitude),\n        Number(from.longitude),\n        Number(to.latitude),\n        Number(to.longitude)\n      );\n  }\n\n\n  // จากป้ายแรก → ปลายทาง\n  for (\n    let i = 0;\n    i < destinationIndex;\n    i++\n  ) {\n\n    const from = routeStops[i];\n    const to = routeStops[i + 1];\n\n    totalDistance +=\n      haversine(\n        Number(from.latitude),\n        Number(from.longitude),\n        Number(to.latitude),\n        Number(to.longitude)\n      );\n  }\n}\n\n\n// ========================================\n// ส่งผลลัพธ์\n// ========================================\n\nreturn [{\n  json: {\n    ...busData,\n\n    total_distance_km:\n      Number(totalDistance.toFixed(3)),\n\n    distance_calculation:\n      \"Haversine Latitude/Longitude\"\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -512,
+        480
+      ],
+      "id": "2ce6fa27-ff06-4438-b38f-295e538ecd48",
+      "name": "คำนวณระยะทางถึงปลายทาง"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// ข้อมูลจาก Random Forest\n// ========================================\n\nconst prediction = $('ทำนาย ETA Random Forest')\n  .first()\n  .json;\n\n\n// ========================================\n// ข้อมูลรถและเส้นทาง\n// ========================================\n\nconst source = $('คำนวณระยะทางถึงปลายทาง')\n  .first()\n  .json;\n\n\n// ========================================\n// ข้อมูล LINE\n// ========================================\n\nconst routeData = $('ค้นหาเส้นทางจาก LINE')\n  .first()\n  .json;\n\n\n// ========================================\n// ชื่อสาย\n// ========================================\n\nlet routeName = \"ไม่ทราบสาย\";\n\nif (source.route_id === \"RED\") {\n  routeName = \"🔴 สายสีแดง\";\n}\n\nif (source.route_id === \"BLUE\") {\n  routeName = \"🔵 สายสีน้ำเงิน\";\n}\n\n\n// ========================================\n// ระยะทาง\n// ========================================\n\nconst distance = Number(\n  source.total_distance_km ??\n  source.distance_km ??\n  prediction.distance_km ??\n  0\n);\n\n\n// ========================================\n// ETA จาก Random Forest\n// ========================================\n\nconst predictedETA = Number(\n  prediction.predicted_eta_minutes\n) || 0;\n\n\n// ========================================\n// จำนวนป้ายที่เหลือ\n// ========================================\n\nconst remainingStops = Number(\n  source.remaining_stops\n) || 0;\n\n\n// ========================================\n// ความเร็ว\n// ========================================\n\nconst speed = Number(\n  source.speed_kmh\n) || 0;\n\n\n// ========================================\n// สร้างข้อความ LINE\n// ========================================\n\nconst text = `🚌 MSU EV Bus\n\n${routeName}\n\n📍 รถอยู่ที่\n${source.current_stop_name || \"-\"}\n\n🎯 ปลายทาง\n${source.destination_stop_name ||\n routeData.destination ||\n \"-\"}\n\n📏 ระยะทางประมาณ\n${distance.toFixed(3)} กม.\n\n🚍 ความเร็วรถ\n${speed.toFixed(1)} กม./ชม.\n\n🤖 ETA จาก Random Forest\nประมาณ ${predictedETA.toFixed(2)} นาที\n\n🚏 เหลือประมาณ\n${remainingStops} ป้าย\n\n🕐 อัปเดต\n${new Date().toLocaleString(\"th-TH\")}`;\n\n\n// ========================================\n// OUTPUT\n// ========================================\n\nreturn [{\n  json: {\n\n    replyToken:\n      source.replyToken ||\n      routeData.replyToken ||\n      \"\",\n\n    route_id:\n      source.route_id,\n\n    bus_id:\n      source.bus_id,\n\n    text,\n\n    // เก็บข้อมูลไว้ตรวจสอบด้วย\n    distance_km:\n      distance,\n\n    predicted_eta_minutes:\n      predictedETA,\n\n    remaining_stops:\n      remainingStops\n\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        480
+      ],
+      "id": "7900b788-c79e-4f22-b1b9-47b1cc55f586",
+      "name": "รวมเส้นทาง + ETA"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// คำนวณป้ายที่เหลือ + เลือกรถที่ใกล้ปลายทางที่สุด\n// MSU Smart Bus\n// ========================================\n\nconst inputBuses = $input.all().map(item => item.json);\n\nconst stops = $('ดึงข้อมูลป้าย MSU')\n  .all()\n  .map(item => item.json);\n\nconst routeData = $('ค้นหาเส้นทางจาก LINE')\n  .first()\n  .json;\n\n\n// ========================================\n// 1. เลือกรถข้อมูลล่าสุดของแต่ละคัน\n// ========================================\n\nconst latestBuses = new Map();\n\nfor (const bus of inputBuses) {\n\n  if (!bus.bus_id) continue;\n\n  const currentTime = new Date(\n    bus.timestamp ||\n    bus.updatedAt ||\n    bus.createdAt ||\n    0\n  ).getTime();\n\n  const oldBus = latestBuses.get(bus.bus_id);\n\n  if (!oldBus) {\n\n    latestBuses.set(bus.bus_id, bus);\n\n    continue;\n  }\n\n  const oldTime = new Date(\n    oldBus.timestamp ||\n    oldBus.updatedAt ||\n    oldBus.createdAt ||\n    0\n  ).getTime();\n\n  if (currentTime >= oldTime) {\n    latestBuses.set(bus.bus_id, bus);\n  }\n}\n\n\n// ========================================\n// 2. คำนวณป้ายที่เหลือของรถแต่ละคัน\n// ========================================\n\nconst results = [];\n\nfor (const bus of latestBuses.values()) {\n\n  // รถต้องเป็นสายเดียวกับเส้นทางที่ผู้ใช้ค้นหา\n  if (bus.route_id !== routeData.route_id) {\n    continue;\n  }\n\n\n  // ----------------------------------------\n  // เรียงป้ายตามลำดับ\n  // ----------------------------------------\n\n  const routeStops = stops\n    .filter(stop => stop.route_id === bus.route_id)\n    .sort(\n      (a, b) =>\n        Number(a.sequence) -\n        Number(b.sequence)\n    );\n\n\n  if (routeStops.length === 0) {\n    continue;\n  }\n\n\n  // ----------------------------------------\n  // หาตำแหน่งรถปัจจุบัน\n  // ----------------------------------------\n\n  const currentIndex = routeStops.findIndex(\n    stop =>\n      stop.stop_id === bus.current_stop_id\n  );\n\n\n  // ----------------------------------------\n  // หาตำแหน่งปลายทาง\n  // ----------------------------------------\n\n  const destinationIndex = routeStops.findIndex(\n    stop =>\n      stop.stop_id === routeData.destination_stop_id\n  );\n\n\n  if (\n    currentIndex === -1 ||\n    destinationIndex === -1\n  ) {\n    continue;\n  }\n\n\n  const currentStop =\n    routeStops[currentIndex];\n\n  const destinationStop =\n    routeStops[destinationIndex];\n\n\n  // ========================================\n  // 3. คำนวณจำนวนป้ายแบบ \"วนรอบ\"\n  // ========================================\n\n  let remainingStops =\n    (destinationIndex - currentIndex + routeStops.length)\n    % routeStops.length;\n\n\n  // ถ้ารถอยู่ที่ปลายทางแล้ว\n  if (currentIndex === destinationIndex) {\n    remainingStops = 0;\n  }\n\n\n  // ========================================\n  // 4. คำนวณระยะทางแบบประมาณ\n  // ========================================\n\n  let totalDistanceKm = 0;\n\n  let index = currentIndex;\n\n  while (index !== destinationIndex) {\n\n    const nextIndex =\n      (index + 1) % routeStops.length;\n\n    const from = routeStops[index];\n    const to = routeStops[nextIndex];\n\n\n    // Haversine\n    const R = 6371;\n\n    const lat1 =\n      Number(from.latitude) * Math.PI / 180;\n\n    const lat2 =\n      Number(to.latitude) * Math.PI / 180;\n\n    const dLat =\n      (Number(to.latitude) -\n       Number(from.latitude)) *\n      Math.PI / 180;\n\n    const dLon =\n      (Number(to.longitude) -\n       Number(from.longitude)) *\n      Math.PI / 180;\n\n\n    const a =\n      Math.sin(dLat / 2) ** 2 +\n      Math.cos(lat1) *\n      Math.cos(lat2) *\n      Math.sin(dLon / 2) ** 2;\n\n    const c =\n      2 * Math.atan2(\n        Math.sqrt(a),\n        Math.sqrt(1 - a)\n      );\n\n    const distance =\n      R * c;\n\n\n    totalDistanceKm += distance;\n\n    index = nextIndex;\n\n\n    // ป้องกัน loop ผิดพลาด\n    if (remainingStops === 0) {\n      break;\n    }\n  }\n\n\n  // ========================================\n  // 5. สร้างข้อมูลรถ\n  // ========================================\n\n  results.push({\n\n    json: {\n\n      replyToken:\n        routeData.replyToken || \"\",\n\n      origin:\n        routeData.origin,\n\n      destination:\n        routeData.destination,\n\n      bus_id:\n        bus.bus_id,\n\n      route_id:\n        bus.route_id,\n\n      current_stop_id:\n        bus.current_stop_id,\n\n      current_stop_name:\n        currentStop.stop_name,\n\n      destination_stop_id:\n        destinationStop.stop_id,\n\n      destination_stop_name:\n        destinationStop.stop_name,\n\n      current_sequence:\n        Number(currentStop.sequence),\n\n      destination_sequence:\n        Number(destinationStop.sequence),\n\n      remaining_stops:\n        remainingStops,\n\n      speed_kmh:\n        Number(bus.speed_kmh) || 0,\n\n      latitude:\n        Number(bus.latitude),\n\n      longitude:\n        Number(bus.longitude),\n\n      total_distance_km:\n        Number(totalDistanceKm.toFixed(3)),\n\n      timestamp:\n        bus.timestamp\n\n    }\n\n  });\n\n}\n\n\n// ========================================\n// 6. ไม่พบรถ\n// ========================================\n\nif (results.length === 0) {\n\n  return [{\n    json: {\n\n      replyToken:\n        routeData.replyToken || \"\",\n\n      error:\n        \"ไม่พบรถในสายที่ต้องการ\",\n\n      text:\n        \"❌ ขณะนี้ไม่พบรถในสายที่ต้องการ\"\n\n    }\n  }];\n\n}\n\n\n// ========================================\n// 7. เลือกรถที่เหลือป้ายน้อยที่สุด\n// ========================================\n\nresults.sort(\n  (a, b) =>\n    a.json.remaining_stops -\n    b.json.remaining_stops\n);\n\n\n// ========================================\n// 8. ส่งเฉพาะรถที่เหมาะสมที่สุด\n// ========================================\n\nreturn [results[0]];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -672,
+        480
+      ],
+      "id": "525cb888-2e9e-4d39-bc40-aad29e215d26",
+      "name": "คำนวณป้ายที่เหลือ"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// คำนวณ ETA รถ MSU\n// ========================================\n\nconst items = $input.all();\n\nreturn items.map(item => {\n\n  const data = item.json;\n\n  // ถ้ามี Error จากขั้นก่อนหน้า\n  if (data.error) {\n    return {\n      json: data\n    };\n  }\n\n  // ระยะทางจากรถถึงปลายทาง (km)\n  const distanceKm =\n    Number(data.total_distance_km) || 0;\n\n  // ความเร็วรถ (km/h)\n  const speedKmh =\n    Number(data.speed_kmh) || 0;\n\n  let etaMinutes = 0;\n\n  // คำนวณเวลา\n  if (speedKmh > 0) {\n\n    etaMinutes =\n      (distanceKm / speedKmh) * 60;\n\n  }\n\n  // ปัดขึ้นเป็นจำนวนนาที\n  etaMinutes =\n    Math.max(1, Math.ceil(etaMinutes));\n\n\n  return {\n    json: {\n\n      ...data,\n\n      estimated_distance_km:\n        Number(distanceKm.toFixed(3)),\n\n      estimated_arrival_minutes:\n        etaMinutes,\n\n      eta_type:\n        \"Calculated from GPS coordinates and speed\",\n\n      calculated_at:\n        new Date().toISOString()\n\n    }\n  };\n\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        -160
+      ],
+      "id": "813de221-d6b3-420d-b071-897b8e33ef1a",
+      "name": "คำนวณ ETA รถ MSU",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const data = item.json;\n\n  return {\n    json: {\n      bus_id: data.bus_id,\n      route_id: data.route_id,\n\n      current_stop_id:\n        data.current_stop_id,\n\n      current_stop_name:\n        data.current_stop_name,\n\n      destination_stop_id:\n        data.destination_stop_id,\n\n      destination_stop_name:\n        data.destination_stop_name,\n\n      distance_km:\n        Number(data.estimated_distance_km) || 0,\n\n      speed_kmh:\n        Number(data.speed_kmh) || 0,\n\n      eta_minutes:\n        Number(data.estimated_arrival_minutes) || 0,\n\n      timestamp:\n        data.calculated_at ||\n        new Date().toISOString()\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        688,
+        480
+      ],
+      "id": "3f92e56e-2916-48b1-99a5-0a95c3b8f37d",
+      "name": "สร้างข้อมูลประวัติ ETA"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// อัปเดตตำแหน่งรถ MSU แบบจำลอง\n// ========================================\n\n// รับข้อมูลรถจาก node ก่อนหน้า\nconst buses = $input.all().map(item => item.json);\n\n// รับข้อมูลป้ายทั้งหมดจาก node \"รวมป้ายเป็น 1 item\"\nconst stops = $('รวมป้ายเป็น 1 item')\n  .first()\n  .json\n  .stops;\n\n// ฟังก์ชันสุ่มความเร็วเล็กน้อย\nfunction randomSpeed(baseSpeed) {\n  const variation = (Math.random() * 4) - 2;\n  return Number((baseSpeed + variation).toFixed(1));\n}\n\n// ฟังก์ชันสร้างข้อมูลรถ\nfunction updateBus(bus) {\n\n  const routeId = bus.route_id;\n\n  // เลือกป้ายของสายรถ\n  const routeStops = stops\n    .filter(stop => stop.route_id === routeId)\n    .sort((a, b) => Number(a.sequence) - Number(b.sequence));\n\n  if (routeStops.length === 0) {\n    return {\n      json: {\n        ...bus,\n        error: `ไม่พบข้อมูลป้ายของสาย ${routeId}`\n      }\n    };\n  }\n\n  // ใช้ current_stop_id เดิม\n  let currentStopIndex = routeStops.findIndex(\n    stop => stop.stop_id === bus.current_stop_id\n  );\n\n  // ถ้าไม่พบ ให้เริ่มจากป้ายแรก\n  if (currentStopIndex < 0) {\n    currentStopIndex = 0;\n  }\n\n  // จำลองให้รถขยับไปป้ายถัดไป\n  let nextStopIndex = currentStopIndex + 1;\n\n  // ถ้าถึงป้ายสุดท้าย ให้กลับไปป้ายแรก\n  if (nextStopIndex >= routeStops.length) {\n    nextStopIndex = 0;\n  }\n\n  const currentStop = routeStops[nextStopIndex];\n\n  return {\n    json: {\n      bus_id: bus.bus_id,\n      route_id: bus.route_id,\n\n      // ใช้พิกัดจริงของป้ายจาก Data Table\n      latitude: Number(currentStop.latitude),\n      longitude: Number(currentStop.longitude),\n\n      // ความเร็วจำลอง\n      speed_kmh: randomSpeed(\n        routeId === \"RED\" ? 20 : 18\n      ),\n\n      // ป้ายปัจจุบัน\n      current_stop_id: currentStop.stop_id,\n\n      // เวลาอัปเดต\n      timestamp: new Date().toISOString()\n    }\n  };\n}\n\n// สร้างข้อมูลรถใหม่\nreturn buses.map(bus => updateBus(bus));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -752,
+        672
+      ],
+      "id": "79db0a60-1447-44ee-b3e6-97de59c2adc6",
+      "name": "อัปเดตตำแหน่งรถจำลอง"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "BbyeppgbZPpcSo4p",
+          "mode": "list",
+          "cachedResultName": "MSU_EV_BUS_LOCATION",
+          "cachedResultUrl": "/projects/vjj88NmEAGk8hI6D/datatables/BbyeppgbZPpcSo4p"
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -1264,
+        672
+      ],
+      "id": "e4e41b34-c6b6-4456-8ad9-a1541b4fd501",
+      "name": "ดึงข้อมูลรถ MSU"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all().map(item => item.json);\n\n// เก็บรถล่าสุดของแต่ละ bus_id\nconst latest = new Map();\n\nfor (const bus of items) {\n  const busId = bus.bus_id;\n\n  if (!busId) continue;\n\n  const existing = latest.get(busId);\n\n  if (!existing) {\n    latest.set(busId, bus);\n    continue;\n  }\n\n  const currentTime =\n    new Date(bus.updatedAt || bus.timestamp || 0).getTime();\n\n  const existingTime =\n    new Date(existing.updatedAt || existing.timestamp || 0).getTime();\n\n  if (currentTime >= existingTime) {\n    latest.set(busId, bus);\n  }\n}\n\nreturn Array.from(latest.values()).map(bus => ({\n  json: bus\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1104,
+        672
+      ],
+      "id": "81fbdf40-9cee-4bc2-8e68-3952a08d87eb",
+      "name": "กรองรถล่าสุด"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "BbyeppgbZPpcSo4p",
+          "mode": "list",
+          "cachedResultName": "MSU_EV_BUS_LOCATION",
+          "cachedResultUrl": "/projects/vjj88NmEAGk8hI6D/datatables/BbyeppgbZPpcSo4p"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "bus_id",
+              "keyValue": "={{ $json.bus_id }}"
+            },
+            {
+              "keyName": "route_id",
+              "keyValue": "={{ $json.route_id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "bus_id": "={{ $json.bus_id }}",
+            "route_id": "={{ $json.route_id }}",
+            "latitude": "={{ $json.latitude }}",
+            "longitude": "={{ $json.longitude }}",
+            "speed_kmh": "={{ $json.speed_kmh }}",
+            "current_stop_id": "={{ $json.current_stop_id }}",
+            "timestamp": "={{ $json.timestamp }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "bus_id",
+              "displayName": "bus_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "route_id",
+              "displayName": "route_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "latitude",
+              "displayName": "latitude",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "longitude",
+              "displayName": "longitude",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "speed_kmh",
+              "displayName": "speed_kmh",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "current_stop_id",
+              "displayName": "current_stop_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -624,
+        832
+      ],
+      "id": "29302915-b36d-4c04-9bb2-c21dfca00295",
+      "name": "Update row(s)1"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "BbyeppgbZPpcSo4p",
+          "mode": "list",
+          "cachedResultName": "MSU_EV_BUS_LOCATION",
+          "cachedResultUrl": "/projects/vjj88NmEAGk8hI6D/datatables/BbyeppgbZPpcSo4p"
+        },
+        "returnAll": true
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -832,
+        480
+      ],
+      "id": "541fd057-f50f-4153-8703-6b87bdcc0cd7",
+      "name": "ดึงข้อมูลรถล่าสุด"
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "value": "gFU86bFuRTeVO9Dj",
+          "mode": "list",
+          "cachedResultName": "MSU_EV_BUS_ETA_HISTORY",
+          "cachedResultUrl": "/projects/vjj88NmEAGk8hI6D/datatables/gFU86bFuRTeVO9Dj"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "bus_id",
+              "displayName": "bus_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "route_id",
+              "displayName": "route_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "current_stop_id",
+              "displayName": "current_stop_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "current_stop_name",
+              "displayName": "current_stop_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "destination_stop_id",
+              "displayName": "destination_stop_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "destination_stop_name",
+              "displayName": "destination_stop_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "distance_km",
+              "displayName": "distance_km",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "speed_kmh",
+              "displayName": "speed_kmh",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "eta_minutes",
+              "displayName": "eta_minutes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        288
+      ],
+      "id": "6b6f0c51-444c-4aab-b9b1-1b6ff3113ad2",
+      "name": "Insert MSU_EV_BUS_ETA_HISTORY"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -1744,
+        672
+      ],
+      "id": "362f0442-7ef0-4ea8-a007-75cac07c74cb",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "XI2esaSfvgJffwpe",
+          "mode": "list",
+          "cachedResultName": "MSU_EV_BUS_STOPS",
+          "cachedResultUrl": "/projects/vjj88NmEAGk8hI6D/datatables/XI2esaSfvgJffwpe"
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -1568,
+        672
+      ],
+      "id": "0e25fc32-751e-41d7-978e-253e7eeea56f",
+      "name": "ดึงข้อมูลป้าย MSU1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const stops = $input.all().map(item => item.json);\n\nreturn [\n  {\n    json: {\n      stops\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1424,
+        672
+      ],
+      "id": "032bfb41-2b3a-462a-b34f-39b221093a78",
+      "name": "รวมป้ายเป็น 1 item"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// สร้างข้อมูล Travel History\n// ========================================\n\nconst buses = $input.all().map(item => item.json);\n\nconst stops = $('รวมป้ายเป็น 1 item')\n  .first()\n  .json\n  .stops;\n\nconst results = [];\n\nfor (const bus of buses) {\n\n  const routeStops = stops\n    .filter(stop => stop.route_id === bus.route_id)\n    .sort(\n      (a, b) =>\n        Number(a.sequence) -\n        Number(b.sequence)\n    );\n\n  if (routeStops.length === 0) {\n    continue;\n  }\n\n  // ป้ายปัจจุบันของรถ\n  const currentIndex = routeStops.findIndex(\n    stop => stop.stop_id === bus.current_stop_id\n  );\n\n  if (currentIndex === -1) {\n    continue;\n  }\n\n  // หาป้ายก่อนหน้า\n  const previousIndex =\n    currentIndex === 0\n      ? routeStops.length - 1\n      : currentIndex - 1;\n\n  const fromStop =\n    routeStops[previousIndex];\n\n  const toStop =\n    routeStops[currentIndex];\n\n  // ========================================\n  // คำนวณระยะทาง\n  // ========================================\n\n  function haversine(\n    lat1,\n    lon1,\n    lat2,\n    lon2\n  ) {\n\n    const R = 6371;\n\n    const dLat =\n      (lat2 - lat1) *\n      Math.PI / 180;\n\n    const dLon =\n      (lon2 - lon1) *\n      Math.PI / 180;\n\n    const a =\n      Math.sin(dLat / 2) ** 2 +\n      Math.cos(lat1 * Math.PI / 180) *\n      Math.cos(lat2 * Math.PI / 180) *\n      Math.sin(dLon / 2) ** 2;\n\n    const c =\n      2 *\n      Math.atan2(\n        Math.sqrt(a),\n        Math.sqrt(1 - a)\n      );\n\n    return R * c;\n  }\n\n  const distanceKm =\n    haversine(\n      Number(fromStop.latitude),\n      Number(fromStop.longitude),\n      Number(toStop.latitude),\n      Number(toStop.longitude)\n    );\n\n\n  // ========================================\n  // เวลา\n  // ========================================\n\n  const timestamp =\n    bus.timestamp ||\n    new Date().toISOString();\n\n  const date =\n    new Date(timestamp);\n\n  const hour =\n    date.getHours();\n\n  const dayOfWeek =\n    date.toLocaleDateString(\n      \"th-TH\",\n      {\n        weekday: \"long\"\n      }\n    );\n\n\n  // ========================================\n  // Travel Time\n  // ========================================\n  //\n  // ตอนนี้เป็นข้อมูลจำลอง\n  // โดยใช้ระยะทาง / ความเร็ว\n  //\n  // ภายหลังเราจะเปลี่ยนเป็น\n  // เวลาที่รถเดินทางจริง\n  //\n\n  const speedKmh =\n    Number(bus.speed_kmh) || 1;\n\n  const travelTimeMinutes =\n    (distanceKm / speedKmh) * 60;\n\n\n  // ========================================\n  // สร้างข้อมูล\n  // ========================================\n\n  results.push({\n\n    json: {\n\n      record_id:\n        `${bus.bus_id}_${Date.now()}_${toStop.stop_id}`,\n\n      bus_id:\n        bus.bus_id,\n\n      route_id:\n        bus.route_id,\n\n      from_stop_id:\n        fromStop.stop_id,\n\n      from_stop_name:\n        fromStop.stop_name,\n\n      to_stop_id:\n        toStop.stop_id,\n\n      to_stop_name:\n        toStop.stop_name,\n\n      distance_km:\n        Number(distanceKm.toFixed(3)),\n\n      speed_kmh:\n        Number(speedKmh.toFixed(1)),\n\n      hour:\n        hour,\n\n      day_of_week:\n        dayOfWeek,\n\n      travel_time_minutes:\n        Number(travelTimeMinutes.toFixed(2)),\n\n      timestamp:\n        timestamp\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -560,
+        672
+      ],
+      "id": "42d8ad42-6bd1-403d-a518-ac6aedbe8406",
+      "name": "สร้างข้อมูล Travel History"
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "value": "tVySeFoAMqcO0z0t",
+          "mode": "list",
+          "cachedResultName": "MSU_EV_BUS_TRAVEL_HISTORY",
+          "cachedResultUrl": "/projects/vjj88NmEAGk8hI6D/datatables/tVySeFoAMqcO0z0t"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "record_id",
+              "displayName": "record_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "bus_id",
+              "displayName": "bus_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "route_id",
+              "displayName": "route_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "from_stop_id",
+              "displayName": "from_stop_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "from_stop_name",
+              "displayName": "from_stop_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "to_stop_id",
+              "displayName": "to_stop_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "to_stop_name",
+              "displayName": "to_stop_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "distance_km",
+              "displayName": "distance_km",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "speed_kmh",
+              "displayName": "speed_kmh",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hour",
+              "displayName": "hour",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "day_of_week",
+              "displayName": "day_of_week",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "travel_time_minutes",
+              "displayName": "travel_time_minutes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "remaining_stops",
+              "displayName": "remaining_stops",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -304,
+        672
+      ],
+      "id": "29c1613a-4eed-4aa4-a76b-6b5536ee8493",
+      "name": "Insert MSU_EV_BUS_TRAVEL_HISTORY"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1856,
+        1344
+      ],
+      "id": "7574bbe5-f759-4a2b-a07b-e907e40782cf",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "tVySeFoAMqcO0z0t",
+          "mode": "list",
+          "cachedResultName": "MSU_EV_BUS_TRAVEL_HISTORY",
+          "cachedResultUrl": "/projects/vjj88NmEAGk8hI6D/datatables/tVySeFoAMqcO0z0t"
+        },
+        "limit": 1000
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -1616,
+        1344
+      ],
+      "id": "26b6dcc9-1535-4112-98a8-77c8e1e45422",
+      "name": "ดึงข้อมูล Travel History"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.all();\n\nconst selected = data.slice(0, 1000);\n\nreturn selected.map(item => ({\n  json: item.json\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1392,
+        1344
+      ],
+      "id": "1fc7400c-bbc4-4594-887b-0d3745a673f2",
+      "name": "เตรียม Dataset ML"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// แบ่ง Dataset เป็น Train / Test\n// Train = 80%\n// Test  = 20%\n// ========================================\n\nconst data = $input.all().map(item => item.json);\n\n// ตรวจสอบว่ามีข้อมูลเพียงพอ\nif (data.length < 10) {\n  return [{\n    json: {\n      error: `ข้อมูลมีเพียง ${data.length} records`,\n      message: \"ควรมีข้อมูลอย่างน้อย 10 records ก่อนแบ่ง Train/Test\"\n    }\n  }];\n}\n\n// สุ่มข้อมูล\nconst shuffled = [...data];\n\nfor (let i = shuffled.length - 1; i > 0; i--) {\n\n  const j = Math.floor(Math.random() * (i + 1));\n\n  [shuffled[i], shuffled[j]] =\n    [shuffled[j], shuffled[i]];\n}\n\n// 80% Train\nconst trainSize =\n  Math.floor(shuffled.length * 0.8);\n\nconst trainData =\n  shuffled.slice(0, trainSize);\n\n// 20% Test\nconst testData =\n  shuffled.slice(trainSize);\n\n\n// ========================================\n// ส่งออกเป็น 2 items\n// ========================================\n\nreturn [\n  {\n    json: {\n      dataset_type: \"train\",\n      count: trainData.length,\n      data: trainData\n    }\n  },\n  {\n    json: {\n      dataset_type: \"test\",\n      count: testData.length,\n      data: testData\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1184,
+        1344
+      ],
+      "id": "186d4a3f-a929-4ad1-b460-aea8ddaaf650",
+      "name": "แบ่งข้อมูล Train Test"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ดึงข้อมูลจาก data ของทั้ง Train และ Test\nconst allItems = $input.all();\n\nconst data = allItems.flatMap(item => {\n  return item.json.data || [];\n});\n\n// แปลงให้อยู่ในรูปแบบตารางสำหรับ CSV\nreturn data.map(row => ({\n  json: {\n    distance_km: Number(row.distance_km),\n    speed_kmh: Number(row.speed_kmh),\n    hour: Number(row.hour),\n    route_id: row.route_id,\n    day_of_week: row.day_of_week,\n    travel_time_minutes: Number(row.travel_time_minutes)\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -960,
+        1344
+      ],
+      "id": "1e676cb2-b030-49fa-840e-deb8ee1003d9",
+      "name": "ส่งออก Dataset CSV"
+    },
+    {
+      "parameters": {
+        "binaryPropertyName": "msu_bus_dataset.csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        -736,
+        1344
+      ],
+      "id": "ddec2bdb-b12b-4514-a530-cbdd73d4c3f1",
+      "name": "ส่งออก Dataset CSV1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json;\n\nconst now = new Date();\n\nconst hour = now.getHours();\n\nconst day_of_week = now.toLocaleDateString(\"th-TH\", {\n  weekday: \"long\"\n});\n\nconst distance = Number(\n  data.total_distance_km ?? data.distance_km\n);\n\nconst speed = Number(data.speed_kmh);\n\nreturn [{\n  json: {\n    ...data,\n\n    distance_km: Number.isFinite(distance) ? distance : 0,\n    speed_kmh: Number.isFinite(speed) ? speed : 0,\n    hour: hour,\n    route_id: data.route_id || \"\",\n    day_of_week: day_of_week\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -352,
+        480
+      ],
+      "id": "33af4ca7-421c-4422-9135-efc0934f1730",
+      "name": "เตรียมข้อมูล Random Forest"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:5000/predict",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"distance_km\": {{$json.distance_km}},\n  \"speed_kmh\": {{$json.speed_kmh}},\n  \"hour\": {{$json.hour}},\n  \"route_id\": \"{{$json.route_id}}\",\n  \"day_of_week\": \"{{$json.day_of_week}}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -176,
+        480
+      ],
+      "id": "e0c77e71-3d30-4e56-a31a-af221fa2b39b",
+      "name": "ทำนาย ETA Random Forest"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// ผล ETA Random Forest\n// ========================================\n\nconst items = $input.all();\n\nreturn items.map(item => {\n\n  const original = item.json;\n\n  const predictedETA =\n    Number(original.predicted_eta_minutes) || 0;\n\n  return {\n    json: {\n      // เก็บข้อมูลเดิมทั้งหมดไว้\n      ...original,\n\n      // ค่าที่ได้จาก Random Forest\n      predicted_eta_minutes:\n        Number(predictedETA.toFixed(2)),\n\n      // ระบุว่า ETA มาจาก ML\n      eta_type:\n        \"Random Forest Machine Learning\",\n\n      calculated_at:\n        new Date().toISOString()\n    }\n  };\n\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        160,
+        480
+      ],
+      "id": "d6f8c6c3-b6f9-4a0e-869c-1d8c37a79e8f",
+      "name": "ผล ETA Random Forest"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ==========================================\n// รวมข้อมูลจาก Random Forest\n// กับข้อมูลรถ/เส้นทางเดิม\n// ==========================================\n\n// ผลจาก Random Forest\nconst prediction = $('ทำนาย ETA Random Forest').first().json;\n\n// ข้อมูลเดิมจาก node คำนวณระยะทางถึงปลายทาง\nconst busData = $('คำนวณระยะทางถึงปลายทาง').first().json;\n\n\n// ==========================================\n// ค่า ETA จาก Random Forest\n// ==========================================\n\nconst predictedETA =\n  Number(prediction.predicted_eta_minutes) || 0;\n\n\n// ==========================================\n// รวมข้อมูลทั้งหมด\n// ==========================================\n\nreturn [\n  {\n    json: {\n\n      // -----------------------------\n      // LINE\n      // -----------------------------\n      replyToken:\n        busData.replyToken || prediction.replyToken || \"\",\n\n      origin:\n        busData.origin || prediction.origin || \"\",\n\n      destination:\n        busData.destination || prediction.destination || \"\",\n\n\n      // -----------------------------\n      // รถ\n      // -----------------------------\n      bus_id:\n        busData.bus_id || prediction.bus_id || \"\",\n\n      route_id:\n        busData.route_id || prediction.route_id || \"\",\n\n\n      // -----------------------------\n      // ปัจจุบัน\n      // -----------------------------\n      current_stop_id:\n        busData.current_stop_id || \"\",\n\n      current_stop_name:\n        busData.current_stop_name || \"\",\n\n\n      // -----------------------------\n      // ปลายทาง\n      // -----------------------------\n      destination_stop_id:\n        busData.destination_stop_id || \"\",\n\n      destination_stop_name:\n        busData.destination_stop_name || \"\",\n\n\n      // -----------------------------\n      // จำนวนป้าย\n      // -----------------------------\n      current_sequence:\n        Number(busData.current_sequence) || 0,\n\n      destination_sequence:\n        Number(busData.destination_sequence) || 0,\n\n      remaining_stops:\n        Number(busData.remaining_stops) || 0,\n\n\n      // -----------------------------\n      // GPS / ความเร็ว\n      // -----------------------------\n      latitude:\n        Number(busData.latitude) || 0,\n\n      longitude:\n        Number(busData.longitude) || 0,\n\n      speed_kmh:\n        Number(busData.speed_kmh || prediction.speed_kmh) || 0,\n\n\n      // -----------------------------\n      // ระยะทาง\n      // -----------------------------\n      distance_km:\n        Number(\n          prediction.distance_km ||\n          busData.distance_km ||\n          busData.total_distance_km\n        ) || 0,\n\n\n      // -----------------------------\n      // ETA Random Forest\n      // -----------------------------\n      predicted_eta_minutes:\n        Number(predictedETA.toFixed(2)),\n\n      estimated_arrival_minutes:\n        Number(predictedETA.toFixed(2)),\n\n\n      // -----------------------------\n      // เวลา\n      // -----------------------------\n      hour:\n        Number(prediction.hour || busData.hour) || 0,\n\n      day_of_week:\n        prediction.day_of_week ||\n        busData.day_of_week ||\n        \"\",\n\n      timestamp:\n        busData.timestamp ||\n        new Date().toISOString()\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        480
+      ],
+      "id": "1f958a47-50c3-4167-a8d3-30e5bd8e909d",
+      "name": "รวมข้อมูล ETA Random Forest"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prediction = $input.first().json;\n\nconst source = $('คำนวณระยะทางถึงปลายทาง')\n  .first()\n  .json;\n\nreturn [{\n  json: {\n\n    // ================================\n    // ข้อมูล LINE\n    // ================================\n\n    replyToken: source.replyToken,\n\n    origin: source.origin,\n\n    destination: source.destination,\n\n\n    // ================================\n    // ข้อมูลรถ\n    // ================================\n\n    bus_id: source.bus_id,\n\n    route_id: source.route_id,\n\n    current_stop_id: source.current_stop_id,\n\n    current_stop_name: source.current_stop_name,\n\n    destination_stop_id: source.destination_stop_id,\n\n    destination_stop_name:\n      source.destination_stop_name,\n\n\n    // ================================\n    // ข้อมูลเส้นทาง\n    // ================================\n\n    current_sequence:\n      source.current_sequence,\n\n    destination_sequence:\n      source.destination_sequence,\n\n    remaining_stops:\n      source.remaining_stops,\n\n\n    // ================================\n    // ข้อมูลรถ\n    // ================================\n\n    speed_kmh:\n      source.speed_kmh,\n\n    latitude:\n      source.latitude,\n\n    longitude:\n      source.longitude,\n\n\n    // ================================\n    // ระยะทาง\n    // ================================\n\n    distance_km:\n      Number(\n        prediction.distance_km ??\n        source.distance_km ??\n        source.total_distance_km ??\n        0\n      ),\n\n\n    // ================================\n    // Random Forest\n    // ================================\n\n    predicted_eta_minutes:\n      Number(\n        prediction.predicted_eta_minutes\n      ),\n\n\n    // ================================\n    // ML Features\n    // ================================\n\n    hour:\n      prediction.hour,\n\n    day_of_week:\n      prediction.day_of_week,\n\n\n    // ================================\n    // เวลา\n    // ================================\n\n    timestamp:\n      source.timestamp,\n\n    eta_model:\n      \"Random Forest\"\n\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        16,
+        480
+      ],
+      "id": "e9d6ae3c-e879-4742-87a4-296789b633a9",
+      "name": "รวมข้อมูลรถ + ผล Random Forest"
+    },
+    {
+      "parameters": {
+        "resource": "table",
+        "operation": "create",
+        "tableName": "MSU_EV_BUS_ETA_PREDICTIONS",
+        "columns": {
+          "column": [
+            {
+              "name": "record_id"
+            },
+            {
+              "name": "bus_id"
+            },
+            {
+              "name": "route_id"
+            },
+            {
+              "name": "current_stop_name"
+            },
+            {
+              "name": "destination_stop_name"
+            },
+            {
+              "name": "distance_km",
+              "type": "number"
+            },
+            {
+              "name": "speed_kmh",
+              "type": "number"
+            },
+            {
+              "name": "hour",
+              "type": "number"
+            },
+            {
+              "name": "day_of_week"
+            },
+            {
+              "name": "predicted_eta_minutes",
+              "type": "number"
+            },
+            {
+              "name": "timestamp"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -240,
+        -160
+      ],
+      "id": "773de607-e7da-4abf-ad00-056c699baef1",
+      "name": "MSU_EV_BUS_ETA_PREDICTIONS",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const data = item.json;\n\n  return {\n    json: {\n      record_id: `${data.bus_id || \"BUS\"}_${Date.now()}`,\n\n      bus_id: data.bus_id || \"\",\n\n      route_id: data.route_id || \"\",\n\n      current_stop_name: data.current_stop_name || \"\",\n\n      destination_stop_name: data.destination_stop_name || \"\",\n\n      distance_km: Number(\n        data.distance_km ??\n        data.estimated_distance_km ??\n        0\n      ),\n\n      speed_kmh: Number(data.speed_kmh || 0),\n\n      hour: Number(data.hour || new Date().getHours()),\n\n      day_of_week:\n        data.day_of_week ||\n        new Date().toLocaleDateString(\"th-TH\", {\n          weekday: \"long\"\n        }),\n\n      predicted_eta_minutes: Number(\n        data.predicted_eta_minutes ??\n        data.estimated_arrival_minutes ??\n        0\n      ),\n\n      timestamp:\n        data.timestamp ||\n        new Date().toISOString()\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        304,
+        480
+      ],
+      "id": "dc5f053d-b804-4c59-ac0e-ceee5014b9c2",
+      "name": "สร้างประวัติ ETA Random Forest"
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "value": "5tJC5fwps4KFENvH",
+          "mode": "list",
+          "cachedResultName": "MSU_EV_BUS_ETA_PREDICTIONS",
+          "cachedResultUrl": "/projects/vjj88NmEAGk8hI6D/datatables/5tJC5fwps4KFENvH"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "record_id",
+              "displayName": "record_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "bus_id",
+              "displayName": "bus_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "route_id",
+              "displayName": "route_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "current_stop_name",
+              "displayName": "current_stop_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "destination_stop_name",
+              "displayName": "destination_stop_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "distance_km",
+              "displayName": "distance_km",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "speed_kmh",
+              "displayName": "speed_kmh",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hour",
+              "displayName": "hour",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "day_of_week",
+              "displayName": "day_of_week",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "predicted_eta_minutes",
+              "displayName": "predicted_eta_minutes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        464,
+        272
+      ],
+      "id": "7c1096d8-efa0-4974-83b8-0fdecd6bfe13",
+      "name": "Insert row"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -1872,
+        1600
+      ],
+      "id": "f4c8552f-6b29-481c-9cff-a4c63833fd68",
+      "name": "Schedule Trigger1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const buses = $('กรองรถล่าสุด1')\n  .all()\n  .map(item => item.json);\n\nconst stops = $('ดึงข้อมูลป้าย')\n  .all()\n  .map(item => item.json);\nconst destinationName = \"ตลาดน้อย\";\n\nfunction haversine(lat1, lon1, lat2, lon2) {\n  const R = 6371;\n\n  const dLat = (lat2 - lat1) * Math.PI / 180;\n  const dLon = (lon2 - lon1) * Math.PI / 180;\n\n  const a =\n    Math.sin(dLat / 2) ** 2 +\n    Math.cos(lat1 * Math.PI / 180) *\n    Math.cos(lat2 * Math.PI / 180) *\n    Math.sin(dLon / 2) ** 2;\n\n  return R * 2 * Math.atan2(\n    Math.sqrt(a),\n    Math.sqrt(1 - a)\n  );\n}\n\nconst dayNames = [\n  \"วันอาทิตย์\",\n  \"วันจันทร์\",\n  \"วันอังคาร\",\n  \"วันพุธ\",\n  \"วันพฤหัสบดี\",\n  \"วันศุกร์\",\n  \"วันเสาร์\"\n];\n\nconst now = new Date();\nconst results = [];\n\nfor (const bus of buses) {\n\n  const routeStops = stops\n    .filter(stop =>\n      stop.route_id === bus.route_id\n    )\n    .sort(\n      (a, b) =>\n        Number(a.sequence) -\n        Number(b.sequence)\n    );\n\n  if (routeStops.length === 0) continue;\n\n  const currentStop = routeStops.find(\n    stop =>\n      String(stop.stop_id) ===\n      String(bus.current_stop_id)\n  );\n\n  if (!currentStop) continue;\n\n  const destinationStop = routeStops.find(\n    stop =>\n      stop.stop_name === destinationName\n  );\n\n  if (!destinationStop) continue;\n\n  const distanceKm = haversine(\n    Number(currentStop.latitude),\n    Number(currentStop.longitude),\n    Number(destinationStop.latitude),\n    Number(destinationStop.longitude)\n  );\n\n  results.push({\n    json: {\n      bus_id: bus.bus_id,\n      route_id: bus.route_id,\n\n      current_stop_id:\n        currentStop.stop_id,\n\n      current_stop_name:\n        currentStop.stop_name,\n\n      destination_stop_id:\n        destinationStop.stop_id,\n\n      destination_stop_name:\n        destinationStop.stop_name,\n\n      distance_km:\n        Number(distanceKm.toFixed(3)),\n\n      speed_kmh:\n        Number(bus.speed_kmh) || 0,\n\n      hour:\n        now.getHours(),\n\n      day_of_week:\n        dayNames[now.getDay()],\n\n      timestamp:\n        bus.timestamp ||\n        now.toISOString()\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1120,
+        1600
+      ],
+      "id": "e7d132f1-e026-4996-8399-c98b4df2a401",
+      "name": "เตรียมข้อมูล ETA อัตโนมัติ"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "XI2esaSfvgJffwpe",
+          "mode": "list",
+          "cachedResultName": "MSU_EV_BUS_STOPS",
+          "cachedResultUrl": "/projects/vjj88NmEAGk8hI6D/datatables/XI2esaSfvgJffwpe"
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -1696,
+        1504
+      ],
+      "id": "cb671276-9791-467f-bf49-a5f987054354",
+      "name": "ดึงข้อมูลป้าย"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:5000/predict",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"distance_km\": {{$json.distance_km}},\n  \"speed_kmh\": {{$json.speed_kmh}},\n  \"hour\": {{$json.hour}},\n  \"route_id\": \"{{$json.route_id}}\",\n  \"day_of_week\": \"{{$json.day_of_week}}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -960,
+        1600
+      ],
+      "id": "b7ebb12e-5bf1-483e-9e4a-b695b2d2211b",
+      "name": "ทำนาย ETA Random Forest1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const predictions = $input.all().map(item => item.json);\n\nconst sources = $('เตรียมข้อมูล ETA อัตโนมัติ')\n  .all()\n  .map(item => item.json);\n\nreturn predictions.map((prediction, index) => {\n\n  const source = sources[index] || {};\n\n  return {\n    json: {\n      record_id:\n        `${source.bus_id || prediction.route_id || \"BUS\"}_${Date.now()}_${index}`,\n\n      bus_id:\n        source.bus_id || \"\",\n\n      route_id:\n        prediction.route_id ||\n        source.route_id ||\n        \"\",\n\n      current_stop_name:\n        source.current_stop_name ||\n        \"\",\n\n      destination_stop_name:\n        source.destination_stop_name ||\n        \"\",\n\n      distance_km:\n        Number(\n          prediction.distance_km ??\n          source.distance_km ??\n          0\n        ),\n\n      speed_kmh:\n        Number(\n          prediction.speed_kmh ??\n          source.speed_kmh ??\n          0\n        ),\n\n      hour:\n        Number(\n          prediction.hour ??\n          source.hour ??\n          new Date().getHours()\n        ),\n\n      day_of_week:\n        prediction.day_of_week ||\n        source.day_of_week ||\n        \"\",\n\n      predicted_eta_minutes:\n        Number(\n          prediction.predicted_eta_minutes ?? 0\n        ),\n\n      timestamp:\n        source.timestamp ||\n        new Date().toISOString()\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -736,
+        1600
+      ],
+      "id": "ce3735b9-3a0b-4297-b4e6-e887dc0cd030",
+      "name": "สร้างประวัติ ETA Random Forest1"
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "value": "5tJC5fwps4KFENvH",
+          "mode": "list",
+          "cachedResultName": "MSU_EV_BUS_ETA_PREDICTIONS",
+          "cachedResultUrl": "/projects/vjj88NmEAGk8hI6D/datatables/5tJC5fwps4KFENvH"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "record_id",
+              "displayName": "record_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "bus_id",
+              "displayName": "bus_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "route_id",
+              "displayName": "route_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "current_stop_name",
+              "displayName": "current_stop_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "destination_stop_name",
+              "displayName": "destination_stop_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "distance_km",
+              "displayName": "distance_km",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "speed_kmh",
+              "displayName": "speed_kmh",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "hour",
+              "displayName": "hour",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "day_of_week",
+              "displayName": "day_of_week",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "predicted_eta_minutes",
+              "displayName": "predicted_eta_minutes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -512,
+        1600
+      ],
+      "id": "82e1200e-a822-4aea-ac08-3df95fe05361",
+      "name": "Insert row1"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "BbyeppgbZPpcSo4p",
+          "mode": "list",
+          "cachedResultName": "MSU_EV_BUS_LOCATION",
+          "cachedResultUrl": "/projects/vjj88NmEAGk8hI6D/datatables/BbyeppgbZPpcSo4p"
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        -1680,
+        1712
+      ],
+      "id": "e1cc6bce-6a06-4f17-b8dd-8494896e53aa",
+      "name": "ดึงข้อมูลรถ MSU1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const buses = $input.all().map(item => item.json);\n\nconst latestBuses = new Map();\n\nfor (const bus of buses) {\n  if (!bus.bus_id) continue;\n\n  const time = new Date(\n    bus.timestamp ||\n    bus.updatedAt ||\n    bus.createdAt ||\n    0\n  ).getTime();\n\n  const old = latestBuses.get(bus.bus_id);\n\n  if (!old) {\n    latestBuses.set(bus.bus_id, bus);\n    continue;\n  }\n\n  const oldTime = new Date(\n    old.timestamp ||\n    old.updatedAt ||\n    old.createdAt ||\n    0\n  ).getTime();\n\n  if (time > oldTime) {\n    latestBuses.set(bus.bus_id, bus);\n  }\n}\n\nreturn Array.from(latestBuses.values())\n  .map(bus => ({\n    json: bus\n  }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1456,
+        1712
+      ],
+      "id": "3cd4eab1-181e-4ed4-81cb-cbcc6e17a0bd",
+      "name": "กรองรถล่าสุด1"
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch"
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        -1280,
+        1600
+      ],
+      "id": "04e189c0-7073-4081-8cda-0e722a61db72",
+      "name": "Merge"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "LINE Webhook - MSU Bus": {
+      "main": [
+        [
+          {
+            "node": "แยกคำสั่ง LINE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "แยกคำสั่ง LINE": {
+      "main": [
+        [
+          {
+            "node": "ดึงข้อมูลป้าย MSU",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ดึงข้อมูลป้าย MSU": {
+      "main": [
+        [
+          {
+            "node": "คำนวณระยะทางจริงระหว่างป้าย",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ค้นหาเส้นทางจาก LINE": {
+      "main": [
+        [
+          {
+            "node": "ดึงข้อมูลรถล่าสุด",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "คำนวณระยะทางจริงระหว่างป้าย": {
+      "main": [
+        [
+          {
+            "node": "ค้นหาเส้นทางจาก LINE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "คำนวณระยะทางถึงปลายทาง": {
+      "main": [
+        [
+          {
+            "node": "เตรียมข้อมูล Random Forest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "รวมเส้นทาง + ETA": {
+      "main": [
+        [
+          {
+            "node": "ตอบกลับ LINE1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "คำนวณป้ายที่เหลือ": {
+      "main": [
+        [
+          {
+            "node": "คำนวณระยะทางถึงปลายทาง",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "คำนวณ ETA รถ MSU": {
+      "main": [
+        []
+      ]
+    },
+    "สร้างข้อมูลประวัติ ETA": {
+      "main": [
+        [
+          {
+            "node": "Insert MSU_EV_BUS_ETA_HISTORY",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "รวมเส้นทาง + ETA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "อัปเดตตำแหน่งรถจำลอง": {
+      "main": [
+        [
+          {
+            "node": "Update row(s)1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "สร้างข้อมูล Travel History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ดึงข้อมูลรถ MSU": {
+      "main": [
+        [
+          {
+            "node": "กรองรถล่าสุด",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "กรองรถล่าสุด": {
+      "main": [
+        [
+          {
+            "node": "อัปเดตตำแหน่งรถจำลอง",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ดึงข้อมูลรถล่าสุด": {
+      "main": [
+        [
+          {
+            "node": "คำนวณป้ายที่เหลือ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "ดึงข้อมูลป้าย MSU1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ดึงข้อมูลป้าย MSU1": {
+      "main": [
+        [
+          {
+            "node": "รวมป้ายเป็น 1 item",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "รวมป้ายเป็น 1 item": {
+      "main": [
+        [
+          {
+            "node": "ดึงข้อมูลรถ MSU",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert MSU_EV_BUS_ETA_HISTORY": {
+      "main": [
+        []
+      ]
+    },
+    "สร้างข้อมูล Travel History": {
+      "main": [
+        [
+          {
+            "node": "Insert MSU_EV_BUS_TRAVEL_HISTORY",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert MSU_EV_BUS_TRAVEL_HISTORY": {
+      "main": [
+        []
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "ดึงข้อมูล Travel History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ดึงข้อมูล Travel History": {
+      "main": [
+        [
+          {
+            "node": "เตรียม Dataset ML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "เตรียม Dataset ML": {
+      "main": [
+        [
+          {
+            "node": "แบ่งข้อมูล Train Test",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "แบ่งข้อมูล Train Test": {
+      "main": [
+        [
+          {
+            "node": "ส่งออก Dataset CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ส่งออก Dataset CSV": {
+      "main": [
+        [
+          {
+            "node": "ส่งออก Dataset CSV1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "เตรียมข้อมูล Random Forest": {
+      "main": [
+        [
+          {
+            "node": "ทำนาย ETA Random Forest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ทำนาย ETA Random Forest": {
+      "main": [
+        [
+          {
+            "node": "รวมข้อมูลรถ + ผล Random Forest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ผล ETA Random Forest": {
+      "main": [
+        [
+          {
+            "node": "สร้างประวัติ ETA Random Forest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "รวมข้อมูล ETA Random Forest": {
+      "main": [
+        [
+          {
+            "node": "สร้างข้อมูลประวัติ ETA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "รวมข้อมูลรถ + ผล Random Forest": {
+      "main": [
+        [
+          {
+            "node": "ผล ETA Random Forest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "สร้างประวัติ ETA Random Forest": {
+      "main": [
+        [
+          {
+            "node": "Insert row",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "รวมข้อมูล ETA Random Forest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert row": {
+      "main": [
+        []
+      ]
+    },
+    "Schedule Trigger1": {
+      "main": [
+        [
+          {
+            "node": "ดึงข้อมูลป้าย",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "ดึงข้อมูลรถ MSU1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ดึงข้อมูลป้าย": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "เตรียมข้อมูล ETA อัตโนมัติ": {
+      "main": [
+        [
+          {
+            "node": "ทำนาย ETA Random Forest1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ทำนาย ETA Random Forest1": {
+      "main": [
+        [
+          {
+            "node": "สร้างประวัติ ETA Random Forest1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "สร้างประวัติ ETA Random Forest1": {
+      "main": [
+        [
+          {
+            "node": "Insert row1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ดึงข้อมูลรถ MSU1": {
+      "main": [
+        [
+          {
+            "node": "กรองรถล่าสุด1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "กรองรถล่าสุด1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "เตรียมข้อมูล ETA อัตโนมัติ",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "46058a80-436b-4f81-a775-a9f7c41df97f",
+  "meta": {
+    "instanceId": "560e3eb9c04674e73a7546a55f1f754f31ffafe2733b912daf528084376ac5b4"
+  },
+  "nodeGroups": [],
+  "id": "xZRIld02Wq7rI3fg",
+  "tags": []
+}
